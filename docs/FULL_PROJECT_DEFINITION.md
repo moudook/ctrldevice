@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # CtrlDevice: The Symbiotic Android Intelligence (Full Project Definition)
 
 ## 1. The Core Philosophy: "Ghost in the Shell"

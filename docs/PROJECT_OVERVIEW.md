@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # CtrlDevice: The Symbiotic Android Agent
 
 ## 1. The Vision

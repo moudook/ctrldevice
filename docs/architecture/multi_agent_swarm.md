@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # Multi-Agent Coordination System (The Operating System)
 
 ## 1. The Core Architecture

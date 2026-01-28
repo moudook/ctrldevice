@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # Context Management: Hierarchical Memory & Compression
 
 ## 1. The Challenge

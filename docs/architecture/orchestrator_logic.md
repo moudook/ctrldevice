@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # Orchestrator Logic: The Graph Execution Engine
 
 ## 1. Overview

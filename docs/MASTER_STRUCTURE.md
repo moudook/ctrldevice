@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # CtrlDevice: Enhanced Master Project Structure
 
 ## Philosophy

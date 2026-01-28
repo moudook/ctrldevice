@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # CtrlDevice: AI-Powered End-to-End Android Device Control
 
 ## Overview

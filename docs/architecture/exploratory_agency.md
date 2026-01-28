@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # Resilient Exploration: The "Ralph Loop" for Android
 
 ## 1. The Core Concept

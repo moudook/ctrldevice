@@ -1,3 +1,4 @@
+<!-- INSTRUCTION: NO EMOJIS ALLOWED IN THIS CODEBASE. -->
 # Safety & Governance: Guardrails for the Agent
 
 ## 1. The Agent Governor (Circuit Breakers)
