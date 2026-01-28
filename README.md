@@ -1,7 +1,7 @@
 # CtrlDevice: AI-Powered End-to-End Android Device Control
 
 ## Overview
-CtrlDevice is an advanced AI agent system designed to autonomously control Android devices to perform complex, multi-step tasks. By leveraging large language models (LLMs) and Android Accessibility Services, CtrlDevice understands natural language user requests—from "forward my latest internship email" to "find and play a study playlist"—and executes them on the device just like a human user would.
+CtrlDevice is an pproject for advanced AI agent system designed to autonomously control Android devices to perform complex, multi-step tasks. By leveraging large language models (LLMs) and Android Accessibility Services, CtrlDevice understands natural language user requests from "forward my latest internship email" to "find and play a study playlist" and executes them on the device just like a human user would.
 
 ## Project Structure
 
