@@ -1,43 +1,49 @@
-package com.ctrldevice.agent.engine
+package com.ctrldevice.features.agent_engine.core
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
+import com.ctrldevice.features.agent_engine.coordination.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
- * The Brain of the operation.
+ * The Main Entry Point (The "Kernel").
+ * Initializes the Agent OS components.
  */
-interface AgentEngine {
+class CtrlDeviceCore {
+
+    // 1. The Nervous System
+    val messageBus = MessageBus()
     
-    val currentState: StateFlow<AgentState>
+    // 2. The Persistence Layer
+    val stateManager = StateManager()
+    
+    // 3. The Resource Arbiter
+    val resourceManager = ResourceManager(messageBus, stateManager)
+    
+    // 4. The Orchestrator (Planner)
+    val orchestrator = Orchestrator(resourceManager)
 
-    /**
-     * Starts a new long-running task.
-     * @param instruction Natural language instruction from user.
-     */
-    suspend fun startTask(instruction: String)
-
-    /**
-     * Pauses execution immediately.
-     * Called when user touches the screen.
-     */
-    fun pause()
-
-    /**
-     * Resumes execution from the saved state.
-     */
-    fun resume()
-
-    /**
-     * Stops and cancels the current task.
-     */
-    fun stop()
+    fun startTask(userInstruction: String) {
+        CoroutineScope(Dispatchers.Default).launch {
+            // A. Plan
+            val taskGraph = orchestrator.plan(userInstruction)
+            
+            // B. Execute
+            val executor = GraphExecutor(
+                graph = taskGraph,
+                resourceManager = resourceManager,
+                messageBus = messageBus,
+                stateManager = stateManager
+            )
+            
+            executor.execute()
+        }
+    }
 }
 
-sealed class AgentState {
-    object Idle : AgentState()
-    data class Planning(val instruction: String) : AgentState()
-    data class Executing(val stepDescription: String, val tool: String) : AgentState()
-    data class Waiting(val reason: String) : AgentState() // e.g., "Waiting for email"
-    object Paused : AgentState()
-    data class Error(val message: String) : AgentState()
+class Orchestrator(private val resourceManager: ResourceManager) {
+    fun plan(instruction: String): TaskGraph {
+        // TODO: Call LLM to generate DAG
+        return TaskGraph() 
+    }
 }
