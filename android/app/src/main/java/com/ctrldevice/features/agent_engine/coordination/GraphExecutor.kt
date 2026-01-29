@@ -1,5 +1,6 @@
 package com.ctrldevice.features.agent_engine.coordination
 
+import com.ctrldevice.features.agent_engine.safety.AgentGovernor
 import kotlinx.coroutines.*
 import kotlinx.datetime.Clock
 
@@ -7,13 +8,27 @@ class GraphExecutor(
     private val graph: TaskGraph,
     private val resourceManager: ResourceManager,
     private val messageBus: MessageBus,
-    private val stateManager: StateManager
+    private val stateManager: StateManager,
+    private val agentGovernor: AgentGovernor
 ) {
     private val activeAgents = mutableMapOf<TaskId, Job>()
     private val ORCHESTRATOR_ID = "Orchestrator"
 
     suspend fun execute() = coroutineScope {
         while (!graph.isComplete()) {
+            if (!agentGovernor.shouldContinue()) {
+                messageBus.send(
+                    Message.DataAvailable(
+                        from = ORCHESTRATOR_ID,
+                        to = "All",
+                        timestamp = Clock.System.now(),
+                        key = "status",
+                        data = "EMERGENCY STOP TRIGGERED by Agent Governor."
+                    )
+                )
+                break
+            }
+
             val readyTasks = graph.getReadyTasks()
 
             readyTasks.forEach { task ->
@@ -51,12 +66,25 @@ class GraphExecutor(
                 return // Will be picked up again in next loop
             }
 
-            // 2. Execute (Stubbed for now)
-            // val result = agent.execute(task)
-            val result = TaskResult.success() // Placeholder
-            
+            // 2. Execute
+            val agent = createAgent(task, agentId)
+            val result = if (agent is com.ctrldevice.features.agent_engine.core.ExploratoryAgent) {
+                // Pass the primary resource (e.g. Screen or App) to the loop
+                // For simplicity in prototype, just pick the first one or a dummy one if empty
+                val primaryResource = resources.firstOrNull() ?: Resource.Screen(true)
+                agent.executeRalphLoop(task, primaryResource)
+            } else {
+                TaskResult.success() // Fallback for unimplemented agents
+            }
+
             // 3. Complete
-            graph.markCompleted(task.id, result)
+            if (result.success) {
+                graph.markCompleted(task.id, result)
+                agentGovernor.shouldContinue(result, agentId) // Report success to reset counters
+            } else {
+                 graph.markFailed(task.id, result.error ?: Exception("Unknown error"))
+                 agentGovernor.shouldContinue(result, agentId) // Report failure to increment counters & check loops
+            }
             
             // 4. Release Resources
             leases.forEach { lease ->
@@ -76,6 +104,14 @@ class GraphExecutor(
             )
         } finally {
             activeAgents.remove(task.id)
+        }
+    }
+
+    private fun createAgent(task: TaskNode.AtomicTask, agentId: AgentId): com.ctrldevice.features.agent_engine.core.Agent? {
+        return when (task.assignedTo) {
+            AgentType.SYSTEM -> com.ctrldevice.features.agent_engine.core.SystemAgent(agentId, resourceManager, messageBus, stateManager)
+            AgentType.RESEARCH -> com.ctrldevice.features.agent_engine.core.ResearchAgent(agentId, resourceManager, messageBus, stateManager)
+            else -> null
         }
     }
 

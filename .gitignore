@@ -1,0 +1,17 @@
+# Android
+local.properties
+.gradle/
+build/
+*/build/
+.idea/
+*.iml
+*.jks
+*.keystore
+
+# Gradle
+.gradle
+gradle-8.5/
+gradle-8.5-bin.zip
+
+# OS
+.DS_Store

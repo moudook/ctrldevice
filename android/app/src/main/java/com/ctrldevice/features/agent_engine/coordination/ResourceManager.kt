@@ -7,6 +7,7 @@ import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import java.util.PriorityQueue
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -38,7 +39,8 @@ class ResourceManager(
     private val stateManager: StateManager
 ) {
     private val leases = ConcurrentHashMap<Resource, ResourceLease>()
-    private val waitQueue = PriorityQueue<ResourceRequest>(compareBy { -it.priority })
+    // private val waitQueue = PriorityQueue<ResourceRequest>(compareBy { -it.priority }) // Replaced with resource-specific queues
+    private val waitQueues = ConcurrentHashMap<Resource, PriorityQueue<ResourceRequest>>()
     private val waiters = ConcurrentHashMap<AgentId, CancellableContinuation<ResourceLease?>>()
 
     suspend fun acquire(
@@ -119,12 +121,19 @@ class ResourceManager(
         timeout: Duration
     ): ResourceLease? = withTimeoutOrNull(timeout) {
         val request = ResourceRequest(resource, requester, priority)
-        waitQueue.add(request)
-        
+
+        synchronized(waitQueues) {
+            waitQueues.computeIfAbsent(resource) {
+                PriorityQueue(compareBy { -it.priority })
+            }.add(request)
+        }
+
         suspendCancellableCoroutine { continuation ->
             waiters[requester] = continuation
-            continuation.invokeOnCancellation { 
-                waitQueue.remove(request)
+            continuation.invokeOnCancellation {
+                synchronized(waitQueues) {
+                    waitQueues[resource]?.remove(request)
+                }
                 waiters.remove(requester)
             }
         }
@@ -134,7 +143,30 @@ class ResourceManager(
         val lease = leases[resource]
         if (lease?.owner == owner) {
             leases.remove(resource)
-            // TODO: Process waitQueue to notify next waiter
+
+            // Process waitQueue to notify next waiter
+            var nextRequest: ResourceRequest? = null
+
+            synchronized(waitQueues) {
+                val queue = waitQueues[resource]
+                if (queue != null && queue.isNotEmpty()) {
+                    nextRequest = queue.poll()
+                }
+            }
+
+            if (nextRequest != null) {
+                val continuation = waiters.remove(nextRequest!!.requester)
+                if (continuation != null && continuation.isActive) {
+                    val newLease = grantLease(
+                        resource = nextRequest!!.resource,
+                        owner = nextRequest!!.requester,
+                        priority = nextRequest!!.priority,
+                        timeout = 30.seconds, // Default extension
+                        now = Clock.System.now()
+                    )
+                    continuation.resume(newLease)
+                }
+            }
         }
     }
 

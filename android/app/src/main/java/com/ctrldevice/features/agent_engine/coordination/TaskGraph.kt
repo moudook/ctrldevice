@@ -106,6 +106,52 @@ class TaskGraph {
         return nodes.keys.all { it in completedTasks || it in failedTasks }
     }
 
+    fun addCompositeNode(node: TaskNode) {
+        when (node) {
+            is TaskNode.AtomicTask -> addNode(node)
+            is TaskNode.ParallelGroup -> {
+                node.tasks.forEach { addCompositeNode(it) }
+            }
+            is TaskNode.SequentialGroup -> {
+                if (node.tasks.isEmpty()) return
+
+                // 1. Add all children
+                node.tasks.forEach { addCompositeNode(it) }
+
+                // 2. Link them
+                for (i in 0 until node.tasks.size - 1) {
+                    val current = node.tasks[i]
+                    val next = node.tasks[i+1]
+
+                    val sinks = getSinkIds(current)
+                    val sources = getSourceIds(next)
+
+                    for (sink in sinks) {
+                        for (source in sources) {
+                            addEdge(sink, source)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun getSinkIds(node: TaskNode): List<TaskId> {
+        return when (node) {
+            is TaskNode.AtomicTask -> listOf(node.id)
+            is TaskNode.ParallelGroup -> node.tasks.flatMap { getSinkIds(it) }
+            is TaskNode.SequentialGroup -> if (node.tasks.isNotEmpty()) getSinkIds(node.tasks.last()) else emptyList()
+        }
+    }
+
+    private fun getSourceIds(node: TaskNode): List<TaskId> {
+        return when (node) {
+            is TaskNode.AtomicTask -> listOf(node.id)
+            is TaskNode.ParallelGroup -> node.tasks.flatMap { getSourceIds(it) }
+            is TaskNode.SequentialGroup -> if (node.tasks.isNotEmpty()) getSourceIds(node.tasks.first()) else emptyList()
+        }
+    }
+
     fun toMermaidDiagram(): String {
         return buildString {
             appendLine("graph TD")
