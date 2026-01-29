@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">CtrlDevice</string>
+    <string name="accessibility_service_description">AI Agent that helps you control your device.</string>
+</resources>
