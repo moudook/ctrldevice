@@ -15,3 +15,9 @@ gradle-8.5-bin.zip
 
 # OS
 .DS_Store
+
+# Documentation
+*.md
+!README.md
+!PROGRESS.md
+!PHILOSOPHY.md
