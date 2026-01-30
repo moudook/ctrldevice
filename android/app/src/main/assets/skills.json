@@ -1,0 +1,14 @@
+{
+  "macros": [
+    {
+      "name": "Daily Briefing",
+      "description": "Checks weather and news",
+      "triggers": ["daily briefing", "morning routine"],
+      "commands": [
+        "Go Home",
+        "Open Chrome \"Weather\"",
+        "Check Battery"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 package com.ctrldevice.features.agent_engine.coordination
 
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.datetime.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -47,14 +51,40 @@ sealed class Message {
         override val timestamp: Instant,
         val state: AgentState
     ) : Message()
+
+    data class UserInterventionNeeded(
+        override val from: AgentId,
+        override val to: AgentId,
+        override val timestamp: Instant,
+        val reason: String
+    ) : Message()
 }
 
 class MessageBus {
+    companion object {
+        val Instance = MessageBus()
+    }
+
     private val channels = ConcurrentHashMap<AgentId, Channel<Message>>()
-    private val messageLog = mutableListOf<Message>()
+
+    private val MAX_LOG_SIZE = 500 // Q23: Bound memory usage
+
+    // Optimization: Use SharedFlow for history management
+    // 1. Thread-safe by design
+    // 2. Automatic rolling window via replay and DROP_OLDEST
+    // 3. Reactive - observers can subscribe to real-time updates
+    private val _messageHistory = MutableSharedFlow<Message>(
+        replay = MAX_LOG_SIZE,
+        extraBufferCapacity = 0,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val messageHistory: SharedFlow<Message> = _messageHistory.asSharedFlow()
 
     fun register(agentId: AgentId): Channel<Message> {
-        return Channel<Message>(Channel.UNLIMITED).also {
+        // Optimization: Use buffered channel (64) instead of UNLIMITED
+        // This introduces backpressure: if an agent is too slow, the sender will suspend,
+        // preventing OOM from infinite buffering.
+        return Channel<Message>(capacity = 64, onBufferOverflow = BufferOverflow.SUSPEND).also {
             channels[agentId] = it
         }
     }
@@ -64,9 +94,13 @@ class MessageBus {
     }
 
     suspend fun send(message: Message) {
-        messageLog.add(message)
+        // 1. Emit to history flow (non-blocking due to DROP_OLDEST)
+        _messageHistory.emit(message)
+
+        // 2. Route to destination (suspending if buffer full)
         channels[message.to]?.send(message)
     }
 
-    fun getHistory(): List<Message> = messageLog.toList()
+    // Returns a snapshot of the current history
+    fun getHistory(): List<Message> = _messageHistory.replayCache
 }

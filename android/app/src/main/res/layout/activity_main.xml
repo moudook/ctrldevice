@@ -52,24 +52,50 @@
             android:gravity="center"/>
 
         <!-- Agent Dashboard -->
-        <TextView
-            android:id="@+id/brainReasoningText"
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🧠 Brain: Waiting..."
-            android:textStyle="italic"
-            android:padding="8dp"
-            android:background="#E3F2FD"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="8dp"
+            app:cardBackgroundColor="#E3F2FD"
+            app:cardCornerRadius="8dp"
+            app:contentPadding="12dp"
+            app:strokeColor="#BBDEFB"
+            app:strokeWidth="1dp">
 
-        <TextView
-            android:id="@+id/strategyText"
+            <TextView
+                android:id="@+id/brainReasoningText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🧠 Brain: Waiting..."
+                android:textStyle="italic"
+                android:textColor="#0D47A1"/>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🔧 Strategy: Default"
-            android:padding="8dp"
-            android:background="#FFF3E0"
-            android:layout_marginTop="4dp"/>
+            android:layout_marginTop="8dp"
+            app:cardBackgroundColor="#FFF3E0"
+            app:cardCornerRadius="8dp"
+            app:contentPadding="12dp"
+            app:strokeColor="#FFE0B2"
+            app:strokeWidth="1dp">
+
+            <TextView
+                android:id="@+id/strategyText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔧 Strategy: Default"
+                android:textColor="#E65100"/>
+        </com.google.android.material.card.MaterialCardView>
+
+        <ProgressBar
+            android:id="@+id/thinkingProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:visibility="invisible"
+            android:layout_marginTop="8dp"/>
 
         <Button
             android:id="@+id/settingsButton"
@@ -77,6 +103,38 @@
             android:layout_height="wrap_content"
             android:text="Open Accessibility Settings"
             android:layout_marginTop="12dp"/>
+
+        <Button
+            android:id="@+id/configButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Configure Agent"
+            android:backgroundTint="#757575"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/skillsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Manage Skills"
+            android:backgroundTint="#009688"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/overlayButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start Overlay"
+            android:backgroundTint="#673AB7"
+            android:layout_marginTop="8dp"/>
+
+        <Button
+            android:id="@+id/graphButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="View Graph"
+            android:backgroundTint="#FF9800"
+            android:layout_marginTop="8dp"/>
 
         <TextView
             android:layout_width="match_parent"
@@ -86,21 +144,14 @@
             android:layout_marginTop="16dp"
             android:layout_marginBottom="4dp"/>
 
-        <ScrollView
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/logRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
             android:background="#EEEEEE"
-            android:padding="8dp">
-
-            <TextView
-                android:id="@+id/logText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Waiting for tasks..."
-                android:fontFamily="monospace"
-                android:textSize="12sp"/>
-        </ScrollView>
+            android:padding="8dp"
+            android:scrollbars="vertical"/>
     </LinearLayout>
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton

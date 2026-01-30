@@ -1,14 +1,15 @@
 package com.ctrldevice.agent.tools
 
 import android.util.Log
-import android.view.accessibility.AccessibilityNodeInfo
-import com.ctrldevice.service.accessibility.ControllerService
+import com.ctrldevice.agent.driver.DeviceDriver
+import com.ctrldevice.agent.driver.ElementCriteria
+import com.ctrldevice.agent.driver.ScrollDirection
 
 /**
  * A tool that finds a scrollable UI element and performs a scroll action.
  * Usage: "scroll down", "scroll up", "scroll [target]"
  */
-class ScrollTool : AgentTool {
+class ScrollTool(private val driver: DeviceDriver) : AgentTool {
     override val name = "scroll"
     override val description = "Scrolls the screen or a specific element. Directions: forward (down) or backward (up)."
 
@@ -16,46 +17,34 @@ class ScrollTool : AgentTool {
         Log.d("ScrollTool", "Executing Scroll command with params: $params")
 
         val direction = if (params.contains("up", ignoreCase = true) || params.contains("back", ignoreCase = true)) {
-            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            ScrollDirection.BACKWARD
         } else {
-            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD // Default to scrolling down/forward
+            ScrollDirection.FORWARD
         }
 
-        val service = ControllerService.instance
-        if (service == null) {
-            return ToolResult(false, "Accessibility Service not connected.")
+        // Logic: if params contains more than just "up/down/scroll", treat rest as target
+        // e.g. "scroll list" -> target="list"
+        val cleanParams = params.replace("scroll", "", ignoreCase = true)
+            .replace("down", "", ignoreCase = true)
+            .replace("up", "", ignoreCase = true)
+            .replace("forward", "", ignoreCase = true)
+            .replace("backward", "", ignoreCase = true)
+            .trim()
+
+        val criteria = if (cleanParams.isNotEmpty()) {
+            ElementCriteria(text = cleanParams, viewId = cleanParams, matchSubstring = true)
+        } else {
+            ElementCriteria() // Any scrollable
         }
 
-        val rootNode = service.rootInActiveWindow ?: return ToolResult(false, "No active window found.")
+        val success = driver.scroll(criteria, direction)
 
-        // 1. Find a scrollable node
-        val scrollableNode = findScrollableNodeRecursive(rootNode)
-
-        if (scrollableNode == null) {
-            return ToolResult(false, "Could not find any scrollable element on screen.")
-        }
-
-        // Perform the action
-        val success = scrollableNode.performAction(direction)
-
-        val dirString = if (direction == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) "down/forward" else "up/backward"
+        val dirString = if (direction == ScrollDirection.FORWARD) "down/forward" else "up/backward"
 
         return if (success) {
             ToolResult(true, "Scrolled $dirString")
         } else {
-            ToolResult(false, "Found scrollable element but failed to scroll $dirString.")
+            ToolResult(false, "Failed to scroll $dirString (Found scrollable element? ${if (cleanParams.isNotEmpty()) "Target: $cleanParams" else "Any"})")
         }
-    }
-
-    private fun findScrollableNodeRecursive(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (node.isScrollable) {
-            return node
-        }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val result = findScrollableNodeRecursive(child)
-            if (result != null) return result
-        }
-        return null
     }
 }

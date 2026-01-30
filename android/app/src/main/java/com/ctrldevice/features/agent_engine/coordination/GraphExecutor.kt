@@ -1,6 +1,9 @@
 package com.ctrldevice.features.agent_engine.coordination
 
 import com.ctrldevice.features.agent_engine.safety.AgentGovernor
+import com.ctrldevice.features.agent_engine.config.AppConfig
+import com.ctrldevice.features.agent_engine.intelligence.LLMBrain
+import com.ctrldevice.features.agent_engine.intelligence.RuleBasedBrain
 import kotlinx.coroutines.*
 import kotlinx.datetime.Clock
 
@@ -9,13 +12,89 @@ class GraphExecutor(
     private val resourceManager: ResourceManager,
     private val messageBus: MessageBus,
     private val stateManager: StateManager,
-    private val agentGovernor: AgentGovernor
+    private val agentGovernor: AgentGovernor,
+    private val appConfig: AppConfig
 ) {
-    private val activeAgents = mutableMapOf<TaskId, Job>()
+    // Optimization: ConcurrentHashMap to prevent race conditions between main loop and agent coroutines
+    private val activeAgents = java.util.concurrent.ConcurrentHashMap<TaskId, Job>()
+    private val updateSignal = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private val ORCHESTRATOR_ID = "Orchestrator"
+    private var totalStepsExecuted = 0
+    private val MAX_TOTAL_STEPS = 50 // Q50: Hard Limit on reasoning steps
+
+    // Architectural Decoupling: internal composition of factory and strategy
+    private val agentFactory = AgentFactory(appConfig, resourceManager, messageBus, stateManager)
+    private val resourceStrategy = ResourceStrategy()
 
     suspend fun execute() = coroutineScope {
-        while (!graph.isComplete()) {
+        // Register for messages (Preemption, etc)
+        val messageChannel = messageBus.register(ORCHESTRATOR_ID)
+
+        try {
+            // Monitor Messages
+            val messageJob = launch {
+                for (msg in messageChannel) {
+                    if (msg is Message.ResourcePreempted) {
+                        val victimAgentId = msg.to
+
+                        // Find the corresponding task
+                        // We iterate active tasks to find which one matches the agentId
+                        val snapshot = graph.getSnapshot()
+                        val victimEntry = activeAgents.entries.find { (taskId, _) ->
+                            val node = snapshot.nodes[taskId] as? TaskNode.AtomicTask
+                            val agentId = if (node != null) "${node.assignedTo}_${node.id}" else ""
+                            agentId == victimAgentId
+                        }
+
+                        if (victimEntry != null) {
+                            val (taskId, job) = victimEntry
+                            // Cancel the job. This will throw CancellationException in executeWithCoordination
+                            job.cancel(CancellationException("Preempted by ResourceManager"))
+                            // cleanup happens in finally block of executeWithCoordination
+                        }
+                    }
+                }
+            }
+
+            // Monitor Pause State
+            val pauseJob = launch {
+                agentGovernor.isPaused.collect { paused ->
+                    if (paused) {
+                        messageBus.send(
+                            Message.UserInterventionNeeded(
+                                from = ORCHESTRATOR_ID,
+                                to = "User",
+                                timestamp = Clock.System.now(),
+                                reason = "Loop detected. Agent appears stuck."
+                            )
+                        )
+                    }
+                    // Trigger loop re-evaluation when pause state changes
+                    updateSignal.trySend(Unit)
+                }
+            }
+
+            while (!graph.isComplete()) {
+            // Check Global Step Limit (Q50)
+            if (totalStepsExecuted >= MAX_TOTAL_STEPS) {
+                 messageBus.send(
+                    Message.DataAvailable(
+                        from = ORCHESTRATOR_ID,
+                        to = "All",
+                        timestamp = Clock.System.now(),
+                        key = "status",
+                        data = "HARD LIMIT REACHED ($MAX_TOTAL_STEPS steps). Stopping."
+                    )
+                )
+                break
+            }
+
+            if (agentGovernor.isPaused.value) {
+                // Wait for unpause signal
+                updateSignal.receive()
+                continue
+            }
+
             if (!agentGovernor.shouldContinue()) {
                 messageBus.send(
                     Message.DataAvailable(
@@ -30,67 +109,76 @@ class GraphExecutor(
             }
 
             val readyTasks = graph.getReadyTasks()
+            var tasksLaunched = 0
 
             readyTasks.forEach { task ->
-                if (task.id !in activeAgents) {
+                // Check Schedule for AtomicTasks
+                if (task is TaskNode.AtomicTask && task.scheduledStart > System.currentTimeMillis()) {
+                    // Task is topologically ready but scheduled for the future. Skip for now.
+                    return@forEach
+                }
+
+                if (!activeAgents.containsKey(task.id)) {
                     val job = launch {
                         executeWithCoordination(task)
                     }
                     activeAgents[task.id] = job
+                    tasksLaunched++
                 }
             }
-            delay(500)
+
+            // Optimization: Event-driven wait instead of polling
+            // We wait if:
+            // 1. Tasks are running (wait for completion)
+            // 2. No tasks running but graph incomplete (wait for schedule/timeout)
+            if (activeAgents.isNotEmpty()) {
+                // Wait for a task to finish OR 500ms heartbeat
+                withTimeoutOrNull(500) {
+                    updateSignal.receive()
+                }
+            } else if (tasksLaunched == 0 && !graph.isComplete()) {
+                // Nothing running, nothing ready (likely waiting on schedule)
+                delay(100)
+            }
         }
+    } finally {
+        // Optimization: Ensure we unregister to prevent memory leaks if cancelled
+        messageBus.unregister(ORCHESTRATOR_ID)
     }
+}
 
     private suspend fun executeWithCoordination(task: TaskNode) {
         if (task !is TaskNode.AtomicTask) return
 
         val agentId = "${task.assignedTo}_${task.id}"
-        
+
+        // Logic Compression: `withResources` scope handles acquisition/release boilerplate
         try {
-            // 1. Acquire Resources
-            val resources = determineRequiredResources(task)
-            val leases = resources.mapNotNull { resource ->
-                resourceManager.acquire(
-                    resource = resource,
-                    requester = agentId,
-                    priority = task.priority,
-                    timeout = task.estimatedDuration * 2
-                )
-            }
+            withResources(task, agentId) { resources ->
+                // 2. Execute
+                val agent = agentFactory.createAgent(task, agentId)
 
-            if (leases.size < resources.size) {
-                // Failed to get all resources, release what we got and retry later
-                leases.forEach { resourceManager.release(it.resource, agentId) }
-                return // Will be picked up again in next loop
-            }
+                val result = if (agent is com.ctrldevice.features.agent_engine.core.ExploratoryAgent) {
+                    val primaryResource = resources.firstOrNull() ?: Resource.Screen(true)
+                    // Optimization: Data Flow Pipe
+                    val inputData = graph.getDataFromDependencies(task.id)
+                    agent.executeRalphLoop(task, primaryResource, inputData)
+                } else {
+                    TaskResult.success() // Fallback
+                }
 
-            // 2. Execute
-            val agent = createAgent(task, agentId)
-            val result = if (agent is com.ctrldevice.features.agent_engine.core.ExploratoryAgent) {
-                // Pass the primary resource (e.g. Screen or App) to the loop
-                // For simplicity in prototype, just pick the first one or a dummy one if empty
-                val primaryResource = resources.firstOrNull() ?: Resource.Screen(true)
-                agent.executeRalphLoop(task, primaryResource)
-            } else {
-                TaskResult.success() // Fallback for unimplemented agents
-            }
+                // 3. Complete
+                if (result.success) {
+                    graph.markCompleted(task.id, result)
+                } else {
+                    graph.markFailed(task.id, result.error ?: Exception("Unknown error"))
+                }
 
-            // 3. Complete
-            if (result.success) {
-                graph.markCompleted(task.id, result)
-                agentGovernor.shouldContinue(result, agentId) // Report success to reset counters
-            } else {
-                 graph.markFailed(task.id, result.error ?: Exception("Unknown error"))
-                 agentGovernor.shouldContinue(result, agentId) // Report failure to increment counters & check loops
+                // Update counters
+                agentGovernor.shouldContinue(result, agentId)
+                totalStepsExecuted++
+                updateSignal.trySend(Unit)
             }
-            
-            // 4. Release Resources
-            leases.forEach { lease ->
-                resourceManager.release(lease.resource, agentId)
-            }
-
         } catch (e: Exception) {
             graph.markFailed(task.id, e)
             messageBus.send(
@@ -107,32 +195,39 @@ class GraphExecutor(
         }
     }
 
-    private fun createAgent(task: TaskNode.AtomicTask, agentId: AgentId): com.ctrldevice.features.agent_engine.core.Agent? {
-        return when (task.assignedTo) {
-            AgentType.SYSTEM -> com.ctrldevice.features.agent_engine.core.SystemAgent(agentId, resourceManager, messageBus, stateManager)
-            AgentType.RESEARCH -> com.ctrldevice.features.agent_engine.core.ResearchAgent(agentId, resourceManager, messageBus, stateManager)
-            else -> null
-        }
-    }
+    /**
+     * Logic Compression: Higher-order function to encapsulate resource lifecycle.
+     * Returns true if resources were acquired and block executed, false otherwise.
+     */
+    private suspend fun withResources(
+        task: TaskNode.AtomicTask,
+        agentId: String,
+        block: suspend (List<Resource>) -> Unit
+    ) {
+        val resources = resourceStrategy.determineRequiredResources(task)
+        val leases = ArrayList<ResourceLease>(resources.size)
 
-    private fun determineRequiredResources(task: TaskNode.AtomicTask): List<Resource> {
-        return when (task.assignedTo) {
-            AgentType.RESEARCH -> listOf(
-                Resource.App("com.android.chrome"),
-                Resource.Screen(isExclusive = true),
-                Resource.Network(priority = task.priority)
-            )
-            AgentType.SOCIAL -> listOf(
-                Resource.App("com.whatsapp"),
-                Resource.Screen(isExclusive = true)
-            )
-            AgentType.MEDIA -> listOf(
-                Resource.App("com.google.android.youtube"),
-                Resource.Screen(isExclusive = false)
-            )
-            AgentType.SYSTEM -> listOf(
-                Resource.Storage("/sdcard/Download")
-            )
+        try {
+            // Acquire all
+            for (res in resources) {
+                val lease = resourceManager.acquire(
+                    resource = res,
+                    requester = agentId,
+                    priority = task.priority,
+                    timeout = task.estimatedDuration * 2
+                )
+                if (lease != null) leases.add(lease)
+                else break // Failed to get one
+            }
+
+            if (leases.size == resources.size) {
+                block(resources)
+            } else {
+                // Failed to acquire all - loop will retry naturally via GraphExecutor logic
+            }
+        } finally {
+            // Release all
+            leases.forEach { resourceManager.release(it.resource, agentId) }
         }
     }
 }

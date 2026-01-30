@@ -23,7 +23,9 @@ interface AgentBrain {
     suspend fun proposeNextStep(
         task: TaskNode.AtomicTask,
         screenContext: String,
-        previousActions: List<String>
+        previousActions: List<String>,
+        screenshotBase64: String? = null,
+        inputData: Map<String, Any> = emptyMap()
     ): BrainThought
 }
 
